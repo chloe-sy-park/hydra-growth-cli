@@ -13,13 +13,13 @@ Claude Desktop에 연결하면 이렇게 쓸 수 있어요:
 
 Claude: 이번 주 주요 지표를 확인했어요.
 
-Threads @theadhdsurvivalclub — 조회 3,216회, 좋아요 37개
-최고 성과 게시물: "ADHD+우울증 콤보로 정신분석치료 3년..."
+Threads @계정ID — 조회 3,216회, 좋아요 37개
+최고 성과 게시물: "오늘의 스레드는+..."
 
-네이버 키워드 트렌드 — 기타(-3.1), 통기타(-2.8) 하락세
+네이버 키워드 트렌드 — 키워드1(-3.1), 키워드2(-2.8) 하락세
 → 비수기 진입 중. 콘텐츠 방향 전환 고려 필요.
 
-lavamusic.kr — 클릭 5회, 평균 순위 6.1위
+도메인주소.kr — 클릭 5회, 평균 순위 6.1위
 → 1페이지 진입 직전. 상위 키워드 집중 공략 추천.
 ```
 
@@ -60,7 +60,7 @@ THREADS_ACCESS_TOKEN=
 # 네이버 DataLab
 NAVER_CLIENT_ID=
 NAVER_CLIENT_SECRET=
-NAVER_TREND_KEYWORDS=기타,통기타,어쿠스틱   # 추적할 키워드
+NAVER_TREND_KEYWORDS=키워드1,키워드2   # 추적할 키워드
 
 # Google (Search Console + GA4)
 GOOGLE_CLIENT_ID=
