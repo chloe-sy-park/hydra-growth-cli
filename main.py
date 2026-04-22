@@ -13,6 +13,172 @@ import config
 app = typer.Typer()
 console = Console()
 
+def get_naver_data():
+    """네이버 검색광고 데이터 가져오기"""
+    import hmac
+    import hashlib
+    import base64
+    import time
+
+    def get_signature(timestamp, method, path):
+        message = f"{timestamp}.{method}.{path}"
+        signature = hmac.new(
+            config.NAVER_SECRET_KEY.encode('utf-8'),
+            message.encode('utf-8'),
+            hashlib.sha256
+        )
+        return base64.b64encode(signature.digest()).decode('utf-8')
+
+    timestamp = str(int(time.time() * 1000))
+    path = "/ncc/campaigns"
+    method = "GET"
+
+    headers = {
+        "X-Timestamp": timestamp,
+        "X-API-KEY": config.NAVER_API_KEY,
+        "X-Customer": str(config.NAVER_CUSTOMER_ID),
+        "X-Signature": get_signature(timestamp, method, path),
+        "Content-Type": "application/json"
+    }
+
+    # 최근 7일 날짜
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    prev_end = (datetime.now() - timedelta(days=8)).strftime('%Y-%m-%d')
+    prev_start = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+
+    def fetch_stats(since, until):
+        path_stat = "/stats"
+        timestamp_s = str(int(time.time() * 1000))
+        headers_s = {
+            "X-Timestamp": timestamp_s,
+            "X-API-KEY": config.NAVER_API_KEY,
+            "X-Customer": str(config.NAVER_CUSTOMER_ID),
+            "X-Signature": get_signature(timestamp_s, "GET", path_stat),
+            "Content-Type": "application/json"
+        }
+        params = {
+            "datePreset": "custom",
+            "startDate": since,
+            "endDate": until,
+            "timeUnit": "allDays",
+            "fields": "clkCnt,impCnt,salesAmt,crpCost",
+            "stat": "campaign"
+        }
+        r = requests.get(
+            "https://api.naver.com/stats",
+            headers=headers_s,
+            params=params
+        )
+        return r.json()
+
+    current = fetch_stats(start_date, end_date)
+    previous = fetch_stats(prev_start, prev_end)
+
+    def parse(data):
+        if not data or 'data' not in data:
+            return None
+        rows = data['data']
+        if not rows:
+            return None
+        total_cost = sum(float(r.get('crpCost', 0)) for r in rows)
+        total_conv = sum(int(r.get('salesAmt', 0)) for r in rows)
+        total_clicks = sum(int(r.get('clkCnt', 0)) for r in rows)
+        total_imp = sum(int(r.get('impCnt', 0)) for r in rows)
+        cpa = total_cost / total_conv if total_conv > 0 else 0
+        ctr = (total_clicks / total_imp * 100) if total_imp > 0 else 0
+        return {
+            'spend': total_cost,
+            'conversions': total_conv,
+            'cpa': cpa,
+            'ctr': ctr
+        }
+
+    curr_parsed = parse(current)
+    prev_parsed = parse(previous)
+
+    if not curr_parsed:
+        return None
+
+    if prev_parsed:
+        curr_parsed['prev_cpa'] = prev_parsed['cpa']
+        curr_parsed['prev_conversions'] = prev_parsed['conversions']
+
+    return curr_parsed
+
+def get_gsc_data():
+    """Google Search Console 오가닉 검색 데이터"""
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+
+    creds = Credentials(
+        token=None,
+        refresh_token=config.GOOGLE_REFRESH_TOKEN,
+        client_id=config.GOOGLE_CLIENT_ID,
+        client_secret=config.GOOGLE_CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=[
+            "https://www.googleapis.com/auth/analytics.readonly",
+            "https://www.googleapis.com/auth/webmasters.readonly"
+        ]
+    )
+    creds.refresh(Request())
+
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+
+    results = []
+
+    for site_url in config.GSC_SITE_URLS:
+        if not site_url:
+            continue
+
+        # 전체 성과
+        payload = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "dimensions": ["query"],
+            "rowLimit": 10,
+            "orderBy": [{"fieldName": "clicks", "sortOrder": "DESCENDING"}]
+        }
+
+        r = requests.post(
+            f"https://www.googleapis.com/webmasters/v3/sites/{requests.utils.quote(site_url, safe='')}/searchAnalytics/query",
+            headers={
+                "Authorization": f"Bearer {creds.token}",
+                "Content-Type": "application/json"
+            },
+            json=payload
+        )
+
+        data = r.json()
+
+        if 'rows' not in data:
+            continue
+
+        total_clicks = sum(row['clicks'] for row in data['rows'])
+        total_impressions = sum(row['impressions'] for row in data['rows'])
+        avg_position = sum(row['position'] for row in data['rows']) / len(data['rows'])
+        top_keywords = [
+            {
+                'keyword': row['keys'][0],
+                'clicks': row['clicks'],
+                'impressions': row['impressions'],
+                'position': round(row['position'], 1)
+            }
+            for row in data['rows'][:5]
+        ]
+
+        results.append({
+            'site': site_url,
+            'clicks': total_clicks,
+            'impressions': total_impressions,
+            'avg_position': round(avg_position, 1),
+            'top_keywords': top_keywords
+        })
+
+    return results if results else None
+
 def get_meta_data():
     end_date = datetime.now().strftime('%Y-%m-%d')
     start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
@@ -192,7 +358,12 @@ def render_dashboard(channels, is_demo=False):
 
     # AI 제안
     console.print("\n[bold yellow]🤖 AI 액션 제안[/bold yellow]")
-    with console.status("[dim]분석 중...[/dim]"):
+    with console.status("[bold green]데이터 가져오는 중...[/bold green]"):
+        meta = get_meta_data()
+        ga4 = get_ga4_data()
+        naver = get_naver_data()
+        gsc = get_gsc_data()
+
         summary = "\n".join([
             f"{c['name']}: 비용 ₩{c['spend']:,.0f} / 전환 {c['conversions']}건 / CPA ₩{c['cpa']:,.0f} / CTR {c['ctr']:.1f}% / 지난주 대비 CPA {'▲' if c.get('prev_cpa',0) and c['cpa']>c['prev_cpa'] else '▼'}"
             for c in channels
@@ -209,11 +380,16 @@ def status():
     with console.status("[bold green]데이터 가져오는 중...[/bold green]"):
         meta = get_meta_data()
         ga4 = get_ga4_data()
+        naver = get_naver_data()
+        gsc = get_gsc_data()
+
 
     channels = []
 
     if meta and meta.get('spend', 0) > 0:
         channels.append({"name": "메타", **meta})
+    if naver and naver.get('spend', 0) > 0:
+        channels.append({"name": "네이버 SA", **naver})
 
     # GA4는 별도 섹션으로 표시
     if ga4:
@@ -230,13 +406,13 @@ def status():
             console.print(f"  지난주 대비: [{color}]{arrow}{abs(change):.0f}%[/{color}]")
         console.print()
 
-    if not channels and not ga4:
+    if not channels and not ga4 and not gsc:
         console.print("[red]데이터를 가져올 수 없어요.[/red]")
         raise typer.Exit()
 
     if channels:
         render_dashboard(channels)
-    elif not channels and ga4:
+    elif not channels:
         console.print("[dim]💡 광고 채널 데이터가 없어요. 광고 집행 후 다시 확인해보세요.[/dim]")
 
     if meta:
@@ -255,6 +431,33 @@ def status():
             color = "green" if change > 0 else "red"
             console.print(f"  지난주 대비: [{color}]{arrow}{abs(change):.0f}%[/{color}]")
         console.print()
+
+    if gsc:
+        console.print(f"\n[bold green]🔍 오가닉 SEO 현황 (최근 7일)[/bold green]")
+        for site in gsc:
+            console.print(f"\n  [cyan]{site['site']}[/cyan]")
+            console.print(f"  클릭수:    [yellow]{site['clicks']:,}[/yellow]")
+            console.print(f"  노출수:    [dim]{site['impressions']:,}[/dim]")
+            console.print(f"  평균순위:  [magenta]{site['avg_position']}위[/magenta]")
+
+            if site['top_keywords']:
+                console.print(f"\n  [bold]상위 키워드 TOP 5[/bold]")
+                kw_table = Table(box=box.SIMPLE, show_header=True, header_style="dim")
+                kw_table.add_column("키워드", style="cyan", width=25)
+                kw_table.add_column("클릭", justify="right", style="yellow", width=8)
+                kw_table.add_column("노출", justify="right", style="dim", width=10)
+                kw_table.add_column("순위", justify="right", style="magenta", width=8)
+
+                for kw in site['top_keywords']:
+                    kw_table.add_row(
+                        kw['keyword'],
+                        str(kw['clicks']),
+                        f"{kw['impressions']:,}",
+                        f"{kw['position']}위"
+                    )
+                console.print(kw_table)
+        console.print()
+
 
     if not channels:
         console.print("[red]광고 데이터를 가져올 수 없어요.[/red]")
