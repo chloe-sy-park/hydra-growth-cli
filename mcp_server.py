@@ -117,5 +117,122 @@ def hydra_demo_report() -> str:
 [GA4] 세션:1,842 전환:36 매출:₩1,240,000
   전환 전주대비: ▲22%"""
 
+
+@mcp.tool(name="hydra_demo_dashboard", annotations={"readOnlyHint": True})
+def hydra_demo_dashboard() -> str:
+    """마케팅 성과 시각화 대시보드 (데모). Chart.js 차트 + 액션 아이템을 HTML로 반환합니다."""
+    return """<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;background:#0f0f0f;color:#e8e8e8;padding:24px}
+h1{font-size:18px;font-weight:700;margin-bottom:4px}
+.sub{color:#888;font-size:13px;margin-bottom:24px}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.kpi{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px}
+.kpi-label{font-size:11px;color:#666;margin-bottom:6px}
+.kpi-value{font-size:22px;font-weight:700;color:#fff}
+.kpi-change{font-size:12px;margin-top:4px}
+.up{color:#4caf50}.down{color:#f44336}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.chart-box{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px}
+.chart-title{font-size:13px;font-weight:600;color:#aaa;margin-bottom:12px}
+.actions{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:20px}
+.actions h2{font-size:14px;font-weight:700;margin-bottom:14px;color:#cc785c}
+.action-item{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}
+.priority{background:#cc785c;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap;margin-top:2px}
+.priority.p2{background:#3d5afe}
+.priority.p3{background:#555}
+.action-text{font-size:13px;line-height:1.5;color:#ccc}
+.action-text strong{color:#fff}
+</style>
+</head>
+<body>
+<h1>📊 Hydra Growth 마케팅 대시보드</h1>
+<div class="sub">이번 주 성과 요약 · 2025년 4월 3주차</div>
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="kpi-label">Threads 조회수</div>
+    <div class="kpi-value">12,847</div>
+    <div class="kpi-change up">▲ 38% 전주대비</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">SEO 평균 순위</div>
+    <div class="kpi-value">4.2위</div>
+    <div class="kpi-change up">▲ 1.3계단 상승</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Meta CPA</div>
+    <div class="kpi-value">₩8,900</div>
+    <div class="kpi-change up">전환 ▲28%</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">GA4 매출</div>
+    <div class="kpi-value">₩1.24M</div>
+    <div class="kpi-change up">▲ 22% 전주대비</div>
+  </div>
+</div>
+
+<div class="charts">
+  <div class="chart-box">
+    <div class="chart-title">🧵 Threads 게시물별 조회수</div>
+    <canvas id="threadsChart" height="160"></canvas>
+  </div>
+  <div class="chart-box">
+    <div class="chart-title">🔍 네이버 키워드 트렌드</div>
+    <canvas id="naverChart" height="160"></canvas>
+  </div>
+</div>
+
+<div class="actions">
+  <h2>⚡ 이번 주 액션 아이템</h2>
+  <div class="action-item">
+    <span class="priority">P1</span>
+    <div class="action-text"><strong>기타레슨 랜딩페이지 최적화</strong> — 네이버 "기타레슨" 검색량 +5.2 상승 중. 지금 랜딩페이지로 연결되는 키워드 내부링크 강화하면 이번 달 안에 전환 20% 이상 개선 가능.</div>
+  </div>
+  <div class="action-item">
+    <span class="priority p2">P2</span>
+    <div class="action-text"><strong>Threads 초보자 시리즈 2편 발행</strong> — "실수" 게시물 8,201회로 압도적 1위. 같은 포맷으로 "기타 독학 vs 레슨 비교" 시리즈 이어가면 알고리즘 탈 가능성 높음.</div>
+  </div>
+  <div class="action-item">
+    <span class="priority p3">P3</span>
+    <div class="action-text"><strong>Meta 광고 예산 10% 증액 검토</strong> — ROAS 개선 중이고 CPA ₩8,900은 업계 평균 대비 효율적. 성과 좋을 때 스케일업 타이밍.</div>
+  </div>
+</div>
+
+<script>
+new Chart(document.getElementById('threadsChart'),{
+  type:'bar',
+  data:{
+    labels:['실수 게시물','독학 vs 레슨','기타 게시물들'],
+    datasets:[{
+      data:[8201,3102,1544],
+      backgroundColor:['#cc785c','#e8956a','#555'],
+      borderRadius:6
+    }]
+  },
+  options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:'#222'},ticks:{color:'#666',font:{size:10}}},y:{grid:{color:'#222'},ticks:{color:'#666',font:{size:10}}}}}
+});
+new Chart(document.getElementById('naverChart'),{
+  type:'line',
+  data:{
+    labels:['1월','2월','3월','4월'],
+    datasets:[
+      {label:'기타',data:[60.1,62.3,64.1,68.2],borderColor:'#cc785c',tension:0.4,pointRadius:3},
+      {label:'통기타',data:[36.2,37.8,38.7,41.5],borderColor:'#3d5afe',tension:0.4,pointRadius:3},
+      {label:'기타레슨',data:[24.1,26.3,27.9,33.1],borderColor:'#4caf50',tension:0.4,pointRadius:3}
+    ]
+  },
+  options:{plugins:{legend:{labels:{color:'#888',font:{size:10}}}},scales:{x:{grid:{color:'#222'},ticks:{color:'#666',font:{size:10}}},y:{grid:{color:'#222'},ticks:{color:'#666',font:{size:10}}}}}
+});
+</script>
+</body>
+</html>"""
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
