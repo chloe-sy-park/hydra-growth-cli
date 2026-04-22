@@ -120,178 +120,83 @@ def hydra_demo_report() -> str:
 
 @mcp.tool(name="hydra_demo_dashboard", annotations={"readOnlyHint": True})
 def hydra_demo_dashboard() -> str:
-    """마케팅 성과 시각화 대시보드 (데모). Chart.js 차트 + 액션 아이템을 HTML로 반환합니다."""
+    """마케팅 성과 시각화 대시보드 (데모). Chart.js 차트 + 액션 아이템 + 라이트/다크 토글을 HTML로 반환합니다."""
     return """<!DOCTYPE html>
-<html lang="ko">
+<html lang=\"ko\" data-theme=\"dark\">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<meta charset=\"UTF-8\">
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<script src=\"https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js\"></script>
 <style>
+:root{--bg:#111113;--surface:#18181c;--border:#2c2c32;--accent:#6e79d6;--accent-dim:rgba(110,121,214,0.15);--green:#3dd68c;--green-dim:rgba(61,214,140,0.12);--text-primary:#f0f0f2;--text-secondary:#b0b0be;--text-muted:#787888;--chart-grid:#2c2c32;--chart-tick:#787888}
+[data-theme=\"light\"]{--bg:#f9f9fb;--surface:#ffffff;--border:#e4e4ea;--accent:#4f5bbf;--accent-dim:rgba(79,91,191,0.08);--green:#1a9e5f;--green-dim:rgba(26,158,95,0.08);--text-primary:#111113;--text-secondary:#4a4a5a;--text-muted:#8a8a9a;--chart-grid:#e8e8f0;--chart-tick:#8a8a9a}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;background:#0f0f0f;color:#e8e8e8;padding:24px}
-h1{font-size:18px;font-weight:700;margin-bottom:4px}
-.sub{color:#888;font-size:13px;margin-bottom:24px}
-.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
-.kpi{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px}
-.kpi-label{font-size:11px;color:#666;margin-bottom:6px}
-.kpi-value{font-size:22px;font-weight:700;color:#fff}
-.kpi-change{font-size:12px;margin-top:4px}
-.up{color:#4caf50}.down{color:#f44336}
-.charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
-.chart-box{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px}
-.chart-title{font-size:13px;font-weight:600;color:#aaa;margin-bottom:12px}
-.actions{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:20px}
-.actions h2{font-size:14px;font-weight:700;margin-bottom:14px;color:#cc785c}
-.action-item{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}
-.priority{background:#cc785c;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap;margin-top:2px}
-.priority.p2{background:#3d5afe}
-.priority.p3{background:#555}
-.action-text{font-size:13px;line-height:1.5;color:#ccc}
-.action-text strong{color:#fff}
+body{font-family:-apple-system,BlinkMacSystemFont,\'SF Pro Display\',\'Inter\',sans-serif;background:var(--bg);color:var(--text-primary);padding:28px;transition:background .2s,color .2s}
+.header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px}
+.header h1{font-size:16px;font-weight:600;letter-spacing:-.01em;margin-bottom:4px}
+.header .meta{font-size:12px;color:var(--text-muted)}
+.header-right{display:flex;align-items:center;gap:10px}
+.badge{display:inline-flex;align-items:center;gap:6px;background:var(--accent-dim);border:1px solid rgba(110,121,214,.25);color:var(--accent);font-size:11px;font-weight:500;padding:5px 11px;border-radius:6px}
+.dot-live{width:6px;height:6px;background:var(--accent);border-radius:50%;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.theme-toggle{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px}
+.kpi-label{font-size:11px;color:var(--text-muted);font-weight:500;letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px}
+.kpi-value{font-size:26px;font-weight:650;letter-spacing:-.03em;margin-bottom:8px;font-variant-numeric:tabular-nums}
+.kpi-change{font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:5px}
+.kpi-change.up{color:var(--green);background:var(--green-dim)}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.chart-box,.actions{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px}
+.section-label{font-size:11px;font-weight:600;color:var(--text-secondary);letter-spacing:.04em;text-transform:uppercase;margin-bottom:14px}
+.actions-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.action-count{font-size:11px;color:var(--text-muted)}
+.action-item{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--border)}
+.action-item:last-child{border-bottom:none;padding-bottom:0}
+.priority-tag{font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;white-space:nowrap;margin-top:1px}
+.p1{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(110,121,214,.3)}
+.p2{background:var(--green-dim);color:var(--green);border:1px solid rgba(61,214,140,.25)}
+.p3{background:rgba(128,128,128,.08);color:var(--text-secondary);border:1px solid var(--border)}
+.action-title{font-size:13px;font-weight:600;margin-bottom:4px;letter-spacing:-.01em}
+.action-desc{font-size:12px;color:var(--text-secondary);line-height:1.65}
 </style>
 </head>
 <body>
-<h1>📊 Hydra Growth 마케팅 대시보드</h1>
-<div class="sub">이번 주 성과 요약 · 2025년 4월 3주차</div>
-
-<div class="kpi-row">
-  <div class="kpi">
-    <div class="kpi-label">Threads 조회수</div>
-    <div class="kpi-value">12,847</div>
-    <div class="kpi-change up">▲ 38% 전주대비</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi-label">SEO 평균 순위</div>
-    <div class="kpi-value">4.2위</div>
-    <div class="kpi-change up">▲ 1.3계단 상승</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi-label">Meta CPA</div>
-    <div class="kpi-value">₩8,900</div>
-    <div class="kpi-change up">전환 ▲28%</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi-label">GA4 매출</div>
-    <div class="kpi-value">₩1.24M</div>
-    <div class="kpi-change up">▲ 22% 전주대비</div>
+<div class=\"header\">
+  <div><h1>Hydra Growth · Marketing Overview</h1><div class=\"meta\">W17 · All channels</div></div>
+  <div class=\"header-right\">
+    <button class=\"theme-toggle\" onclick=\"toggleTheme()\" id=\"themeBtn\">☀️ Light</button>
+    <div class=\"badge\"><span class=\"dot-live\"></span>Live via MCP</div>
   </div>
 </div>
-
-<div class="charts">
-  <div class="chart-box">
-    <div class="chart-title">🧵 Threads 게시물별 조회수</div>
-    <canvas id="threadsChart" height="160"></canvas>
-  </div>
-  <div class="chart-box">
-    <div class="chart-title">🔍 네이버 키워드 트렌드</div>
-    <canvas id="naverChart" height="160"></canvas>
-  </div>
+<div class=\"kpi-row\">
+  <div class=\"kpi\"><div class=\"kpi-label\">Threads Views</div><div class=\"kpi-value\">12,847</div><span class=\"kpi-change up\">↑ 38% WoW</span></div>
+  <div class=\"kpi\"><div class=\"kpi-label\">SEO Avg Rank</div><div class=\"kpi-value\">#4.2</div><span class=\"kpi-change up\">↑ 1.3 positions</span></div>
+  <div class=\"kpi\"><div class=\"kpi-label\">Meta CPA</div><div class=\"kpi-value\">₩8,900</div><span class=\"kpi-change up\">전환 ↑ 28%</span></div>
+  <div class=\"kpi\"><div class=\"kpi-label\">GA4 Revenue</div><div class=\"kpi-value\">₩1.24M</div><span class=\"kpi-change up\">↑ 22% WoW</span></div>
 </div>
-
-<div class="actions">
-  <h2>⚡ 이번 주 액션 아이템</h2>
-  <div class="action-item">
-    <span class="priority">P1</span>
-    <div class="action-text"><strong>기타레슨 랜딩페이지 최적화</strong> — 네이버 "기타레슨" 검색량 +5.2 상승 중. 지금 랜딩페이지로 연결되는 키워드 내부링크 강화하면 이번 달 안에 전환 20% 이상 개선 가능.</div>
-  </div>
-  <div class="action-item">
-    <span class="priority p2">P2</span>
-    <div class="action-text"><strong>Threads 초보자 시리즈 2편 발행</strong> — "실수" 게시물 8,201회로 압도적 1위. 같은 포맷으로 "기타 독학 vs 레슨 비교" 시리즈 이어가면 알고리즘 탈 가능성 높음.</div>
-  </div>
-  <div class="action-item">
-    <span class="priority p3">P3</span>
-    <div class="action-text"><strong>Meta 광고 예산 10% 증액 검토</strong> — ROAS 개선 중이고 CPA ₩8,900은 업계 평균 대비 효율적. 성과 좋을 때 스케일업 타이밍.</div>
-  </div>
+<div class=\"charts\">
+  <div class=\"chart-box\"><div class=\"section-label\">Threads · Top Posts</div><canvas id=\"tc\" height=\"130\"></canvas></div>
+  <div class=\"chart-box\"><div class=\"section-label\">Naver · Keyword Trend</div><canvas id=\"nc\" height=\"130\"></canvas></div>
 </div>
-
+<div class=\"actions\">
+  <div class=\"actions-header\"><div class=\"section-label\" style=\"margin:0\">Action Items</div><div class=\"action-count\">3 open</div></div>
+  <div class=\"action-item\"><span class=\"priority-tag p1\">P1</span><div><div class=\"action-title\">기타레슨 랜딩페이지 최적화</div><div class=\"action-desc\">네이버 검색량 +5.2 상승. 내부링크 강화 시 이달 전환 20% 개선 가능.</div></div></div>
+  <div class=\"action-item\"><span class=\"priority-tag p2\">P2</span><div><div class=\"action-title\">Threads 초보자 시리즈 2편 발행</div><div class=\"action-desc\">"실수" 게시물 8,201회 1위. 같은 포맷 시리즈 이어가면 알고리즘 탈 가능성 높음.</div></div></div>
+  <div class=\"action-item\"><span class=\"priority-tag p3\">P3</span><div><div class=\"action-title\">Meta 광고 예산 10% 증액 검토</div><div class=\"action-desc\">ROAS 개선 중, CPA ₩8,900 효율적. 스케일업 타이밍.</div></div></div>
+</div>
 <script>
-new Chart(document.getElementById('threadsChart'),{
-  type:'bar',
-  data:{
-    labels:['실수 게시물','독학 vs 레슨','기타 게시물들'],
-    datasets:[{
-      data:[8201,3102,1544],
-      backgroundColor:['#cc785c','#e8956a','#555'],
-      borderRadius:6
-    }]
-  },
-  options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:'#222'},ticks:{color:'#666',font:{size:10}}},y:{grid:{color:'#222'},ticks:{color:'#666',font:{size:10}}}}}
-});
-new Chart(document.getElementById('naverChart'),{
-  type:'line',
-  data:{
-    labels:['1월','2월','3월','4월'],
-    datasets:[
-      {label:'기타',data:[60.1,62.3,64.1,68.2],borderColor:'#cc785c',tension:0.4,pointRadius:3},
-      {label:'통기타',data:[36.2,37.8,38.7,41.5],borderColor:'#3d5afe',tension:0.4,pointRadius:3},
-      {label:'기타레슨',data:[24.1,26.3,27.9,33.1],borderColor:'#4caf50',tension:0.4,pointRadius:3}
-    ]
-  },
-  options:{plugins:{legend:{labels:{color:'#888',font:{size:10}}}},scales:{x:{grid:{color:'#222'},ticks:{color:'#666',font:{size:10}}},y:{grid:{color:'#222'},ticks:{color:'#666',font:{size:10}}}}}
-});
+let d=true,tC,nC;
+function toggleTheme(){d=!d;document.documentElement.setAttribute("data-theme",d?"dark":"light");document.getElementById("themeBtn").textContent=d?"☀️ Light":"🌙 Dark";upd()}
+function gc(){return{g:d?"#2c2c32":"#e8e8f0",t:d?"#787888":"#8a8a9a",b1:d?"#6e79d6":"#4f5bbf",b2:d?"#454880":"#9aa0d8",b3:d?"#2c2c38":"#e8e8f0",l1:d?"#6e79d6":"#4f5bbf",l2:d?"#3dd68c":"#1a9e5f",l3:d?"#b0b0be":"#8a8a9a",lg:d?"#b0b0be":"#4a4a5a"}}
+function upd(){const c=gc();tC.data.datasets[0].backgroundColor=[c.b1,c.b2,c.b3];[tC,nC].forEach(ch=>{ch.options.scales.x.grid.color=c.g;ch.options.scales.x.ticks.color=c.t;ch.options.scales.y.grid.color=c.g;ch.options.scales.y.ticks.color=c.t;ch.update()});nC.data.datasets[0].borderColor=nC.data.datasets[0].pointBackgroundColor=gc().l1;nC.data.datasets[1].borderColor=nC.data.datasets[1].pointBackgroundColor=gc().l2;nC.data.datasets[2].borderColor=nC.data.datasets[2].pointBackgroundColor=gc().l3;nC.options.plugins.legend.labels.color=gc().lg;nC.update()}
+const c=gc(),f={size:11,family:"system-ui,sans-serif"};
+tC=new Chart(document.getElementById("tc"),{type:"bar",data:{labels:["실수 게시물","독학 vs 레슨","기타"],datasets:[{data:[8201,3102,1544],backgroundColor:[c.b1,c.b2,c.b3],borderRadius:5,borderSkipped:false}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:c.g},ticks:{color:c.t,font:f}},y:{grid:{color:c.g},ticks:{color:c.t,font:f}}}}});
+nC=new Chart(document.getElementById("nc"),{type:"line",data:{labels:["1월","2월","3월","4월"],datasets:[{label:"기타",data:[60.1,62.3,64.1,68.2],borderColor:c.l1,borderWidth:2,tension:0.4,pointRadius:3,pointBackgroundColor:c.l1,backgroundColor:"transparent"},{label:"통기타",data:[36.2,37.8,38.7,41.5],borderColor:c.l2,borderWidth:2,tension:0.4,pointRadius:3,pointBackgroundColor:c.l2,backgroundColor:"transparent"},{label:"기타레슨",data:[24.1,26.3,27.9,33.1],borderColor:c.l3,borderWidth:2,tension:0.4,pointRadius:3,pointBackgroundColor:c.l3,backgroundColor:"transparent"}]},options:{plugins:{legend:{labels:{color:c.lg,font:f,boxWidth:8,boxHeight:8}}},scales:{x:{grid:{color:c.g},ticks:{color:c.t,font:f}},y:{grid:{color:c.g},ticks:{color:c.t,font:f}}}}});
 </script>
 </body>
 </html>"""
 
-
-@mcp.tool(name="hydra_export_csv", annotations={"readOnlyHint": False})
-def hydra_export_csv() -> str:
-    """마케팅 데이터를 CSV 파일로 내보냅니다. ~/growth-cli/reports/ 폴더에 날짜별로 저장됩니다."""
-    import csv
-    from datetime import datetime
-
-    reports_dir = os.path.expanduser("~/growth-cli/reports")
-    os.makedirs(reports_dir, exist_ok=True)
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    filepath = os.path.join(reports_dir, f"hydra_report_{today}.csv")
-
-    rows = []
-
-    threads = get_threads_data()
-    if threads:
-        rows.append(["Threads", "조회수", threads.get("views", 0), ""])
-        rows.append(["Threads", "좋아요", threads.get("likes", 0), ""])
-        rows.append(["Threads", "댓글", threads.get("replies", 0), ""])
-        rows.append(["Threads", "팔로워", threads.get("followers", 0), ""])
-        for p in (threads.get("top_posts") or [])[:5]:
-            rows.append(["Threads", "TOP게시물", p["views"], p["text"][:50]])
-
-    trends = get_naver_trends()
-    if trends:
-        for t in trends:
-            rows.append(["네이버트렌드", t["keyword"], t["latest"], f"전월대비{t['diff']:+}"])
-
-    gsc = get_gsc_data()
-    if gsc:
-        for site in gsc:
-            rows.append(["SEO", site.get("site",""), site.get("clicks",0), f"순위{site.get('avg_position',0):.1f}위"])
-            for kw in (site.get("top_keywords") or [])[:5]:
-                rows.append(["SEO_키워드", kw.get("query",""), kw.get("clicks",0), f"순위{kw.get('position',0):.1f}위"])
-
-    meta = get_meta_data()
-    if meta:
-        rows.append(["Meta광고", "지출", meta.get("spend", 0), ""])
-        rows.append(["Meta광고", "전환수", meta.get("conversions", 0), ""])
-        rows.append(["Meta광고", "CPA", meta.get("cpa", 0), ""])
-        rows.append(["Meta광고", "CTR", meta.get("ctr", 0), ""])
-
-    ga4 = get_ga4_data()
-    if ga4:
-        rows.append(["GA4", "세션수", ga4.get("sessions", 0), ""])
-        rows.append(["GA4", "전환수", ga4.get("conversions", 0), ""])
-        rows.append(["GA4", "매출", ga4.get("revenue", 0), ""])
-
-    if not rows:
-        return "내보낼 데이터가 없어요. .env API 키를 확인해주세요."
-
-    with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow(["채널", "지표", "값", "메모"])
-        writer.writerows(rows)
-
-    return f"✅ CSV 내보내기 완료!\n경로: {filepath}\n항목 수: {len(rows)}개"
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
