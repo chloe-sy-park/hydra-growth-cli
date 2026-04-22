@@ -45,9 +45,9 @@ def hydra_get_seo_report() -> str:
     if not results: return "GSC 데이터 없음. Google 인증 확인 필요."
     lines = ["SEO 현황 (7일)"]
     for s in results:
-        lines.append(f"사이트: {s['site_url']}")
+        lines.append(f"사이트: {s['site']}")
         lines.append(f"클릭:{s['clicks']} 노출:{s['impressions']} 평균순위:{s['avg_position']:.1f}위")
-        for kw in (s.get("keywords") or [])[:5]:
+        for kw in (s.get("top_keywords") or [])[:5]:
             lines.append(f"  {kw['query']} | 클릭:{kw['clicks']} 순위:{kw['position']:.1f}위")
     return "\n".join(lines)
 
@@ -86,7 +86,7 @@ def hydra_full_report() -> str:
     for r in (get_naver_trends() or [])[:3]:
         sections.append(f"[네이버] {r['keyword']} {r['latest']} {r['trend']}")
     for s in (get_gsc_data() or []):
-        sections.append(f"[SEO] {s['site_url']} 클릭:{s['clicks']} 순위:{s['avg_position']:.1f}위")
+        sections.append(f"[SEO] {s['site']} 클릭:{s['clicks']} 순위:{s['avg_position']:.1f}위")
     m = get_meta_data()
     if m: sections.append(f"[Meta] 지출:{m.get('spend',0):,.0f}원 CPA:{m.get('cpa',0):,.0f}원")
     g = get_ga4_data()
