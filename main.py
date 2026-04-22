@@ -50,6 +50,59 @@ def get_meta_data():
         current['prev_conversions'] = previous['conversions']
     return current
 
+def get_ga4_data():
+    """GA4 데이터 가져오기"""
+    from google.analytics.data_v1beta import BetaAnalyticsDataClient
+    from google.analytics.data_v1beta.types import RunReportRequest, DateRange, Metric, Dimension
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+
+    creds = Credentials(
+        token=None,
+        refresh_token=config.GOOGLE_REFRESH_TOKEN,
+        client_id=config.GOOGLE_CLIENT_ID,
+        client_secret=config.GOOGLE_CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=["https://www.googleapis.com/auth/analytics.readonly"]
+    )
+    creds.refresh(Request())
+
+    client = BetaAnalyticsDataClient(credentials=creds)
+
+    request = RunReportRequest(
+        property=f"properties/{config.GA4_PROPERTY_ID}",
+        date_ranges=[
+            DateRange(start_date="7daysAgo", end_date="yesterday"),
+            DateRange(start_date="14daysAgo", end_date="8daysAgo"),
+        ],
+        metrics=[
+            Metric(name="sessions"),
+            Metric(name="conversions"),
+            Metric(name="totalRevenue"),
+        ],
+    )
+
+    response = client.run_report(request)
+
+    current = response.rows[0].metric_values if response.rows else None
+    previous = response.rows[1].metric_values if len(response.rows) > 1 else None
+
+    if not current:
+        return None
+
+    sessions = int(float(current[0].value))
+    conversions = int(float(current[1].value))
+    revenue = float(current[2].value)
+    prev_conversions = int(float(previous[1].value)) if previous else 0
+
+    return {
+        "name": "GA4",
+        "sessions": sessions,
+        "conversions": conversions,
+        "revenue": revenue,
+        "prev_conversions": prev_conversions,
+    }
+
 def cpa_status(cpa, prev_cpa):
     if prev_cpa == 0:
         return "🟡", 0
@@ -155,12 +208,58 @@ def status():
     """실제 데이터 기반 성과 현황"""
     with console.status("[bold green]데이터 가져오는 중...[/bold green]"):
         meta = get_meta_data()
+        ga4 = get_ga4_data()
 
-    if not meta:
+    channels = []
+
+    if meta and meta.get('spend', 0) > 0:
+        channels.append({"name": "메타", **meta})
+
+    # GA4는 별도 섹션으로 표시
+    if ga4:
+        console.print(f"\n[bold cyan]📈 GA4 웹사이트 현황 (최근 7일)[/bold cyan]")
+        console.print(f"  세션수:  [yellow]{ga4['sessions']:,}[/yellow]")
+        console.print(f"  전환수:  [green]{ga4['conversions']}건[/green]")
+        console.print(f"  매출:    [magenta]₩{ga4['revenue']:,.0f}[/magenta]")
+        prev = ga4['prev_conversions']
+        curr = ga4['conversions']
+        if prev > 0:
+            change = (curr - prev) / prev * 100
+            arrow = "▲" if change > 0 else "▼"
+            color = "green" if change > 0 else "red"
+            console.print(f"  지난주 대비: [{color}]{arrow}{abs(change):.0f}%[/{color}]")
+        console.print()
+
+    if not channels and not ga4:
         console.print("[red]데이터를 가져올 수 없어요.[/red]")
         raise typer.Exit()
 
-    channels = [{"name": "메타", **meta}]
+    if channels:
+        render_dashboard(channels)
+    elif not channels and ga4:
+        console.print("[dim]💡 광고 채널 데이터가 없어요. 광고 집행 후 다시 확인해보세요.[/dim]")
+
+    if meta:
+        channels.append({"name": "메타", **meta})
+
+    if ga4:
+        console.print(f"\n[bold cyan]📈 GA4 웹사이트 현황 (최근 7일)[/bold cyan]")
+        console.print(f"  세션수:  [yellow]{ga4['sessions']:,}[/yellow]")
+        console.print(f"  전환수:  [green]{ga4['conversions']}건[/green]")
+        console.print(f"  매출:    [magenta]₩{ga4['revenue']:,.0f}[/magenta]")
+        prev = ga4['prev_conversions']
+        curr = ga4['conversions']
+        if prev > 0:
+            change = (curr - prev) / prev * 100
+            arrow = "▲" if change > 0 else "▼"
+            color = "green" if change > 0 else "red"
+            console.print(f"  지난주 대비: [{color}]{arrow}{abs(change):.0f}%[/{color}]")
+        console.print()
+
+    if not channels:
+        console.print("[red]광고 데이터를 가져올 수 없어요.[/red]")
+        raise typer.Exit()
+
     render_dashboard(channels)
 
 @app.command()
