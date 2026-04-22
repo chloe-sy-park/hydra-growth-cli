@@ -234,5 +234,64 @@ new Chart(document.getElementById('naverChart'),{
 </body>
 </html>"""
 
+
+@mcp.tool(name="hydra_export_csv", annotations={"readOnlyHint": False})
+def hydra_export_csv() -> str:
+    """마케팅 데이터를 CSV 파일로 내보냅니다. ~/growth-cli/reports/ 폴더에 날짜별로 저장됩니다."""
+    import csv
+    from datetime import datetime
+
+    reports_dir = os.path.expanduser("~/growth-cli/reports")
+    os.makedirs(reports_dir, exist_ok=True)
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    filepath = os.path.join(reports_dir, f"hydra_report_{today}.csv")
+
+    rows = []
+
+    threads = get_threads_data()
+    if threads:
+        rows.append(["Threads", "조회수", threads.get("views", 0), ""])
+        rows.append(["Threads", "좋아요", threads.get("likes", 0), ""])
+        rows.append(["Threads", "댓글", threads.get("replies", 0), ""])
+        rows.append(["Threads", "팔로워", threads.get("followers", 0), ""])
+        for p in (threads.get("top_posts") or [])[:5]:
+            rows.append(["Threads", "TOP게시물", p["views"], p["text"][:50]])
+
+    trends = get_naver_trends()
+    if trends:
+        for t in trends:
+            rows.append(["네이버트렌드", t["keyword"], t["latest"], f"전월대비{t['diff']:+}"])
+
+    gsc = get_gsc_data()
+    if gsc:
+        for site in gsc:
+            rows.append(["SEO", site.get("site",""), site.get("clicks",0), f"순위{site.get('avg_position',0):.1f}위"])
+            for kw in (site.get("top_keywords") or [])[:5]:
+                rows.append(["SEO_키워드", kw.get("query",""), kw.get("clicks",0), f"순위{kw.get('position',0):.1f}위"])
+
+    meta = get_meta_data()
+    if meta:
+        rows.append(["Meta광고", "지출", meta.get("spend", 0), ""])
+        rows.append(["Meta광고", "전환수", meta.get("conversions", 0), ""])
+        rows.append(["Meta광고", "CPA", meta.get("cpa", 0), ""])
+        rows.append(["Meta광고", "CTR", meta.get("ctr", 0), ""])
+
+    ga4 = get_ga4_data()
+    if ga4:
+        rows.append(["GA4", "세션수", ga4.get("sessions", 0), ""])
+        rows.append(["GA4", "전환수", ga4.get("conversions", 0), ""])
+        rows.append(["GA4", "매출", ga4.get("revenue", 0), ""])
+
+    if not rows:
+        return "내보낼 데이터가 없어요. .env API 키를 확인해주세요."
+
+    with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["채널", "지표", "값", "메모"])
+        writer.writerows(rows)
+
+    return f"✅ CSV 내보내기 완료!\n경로: {filepath}\n항목 수: {len(rows)}개"
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
