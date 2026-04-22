@@ -93,8 +93,6 @@ def hydra_full_report() -> str:
     if g: sections.append(f"[GA4] 세션:{g.get('sessions',0):,} 전환:{g.get('conversions',0):,}")
     return "Hydra Growth 통합 리포트\n" + "\n".join(sections) if sections else "데이터 없음. .env API 키 확인 필요."
 
-if __name__ == "__main__":
-    mcp.run(transport="stdio")
 
 
 @mcp.tool(name="hydra_demo_report", annotations={"readOnlyHint": True})
@@ -102,7 +100,7 @@ def hydra_demo_report() -> str:
     """데모용 통합 리포트. 실제 연결 없이도 마케팅 데이터 분석 시연 가능."""
     return """📊 Hydra Growth 데모 리포트 (샘플 데이터)
 
-[Threads] @아이러브기타학원_kr 조회:12,847 좋아요:342 (▲38%)
+[Threads] @lavamusic_kr 조회:12,847 좋아요:342 (▲38%)
   TOP: 기타 처음 시작하는 사람들이 가장 많이 하는 실수 (조회8,201)
   TOP: 독학 3개월차 vs 레슨 3개월차 차이 (조회3,102)
 
@@ -110,11 +108,14 @@ def hydra_demo_report() -> str:
 [네이버트렌드] 통기타 검색량:41.5 ▲ (+2.8)
 [네이버트렌드] 기타레슨 검색량:33.1 ▲ (+5.2)
 
-[SEO] 아이러브기타학원.kr 클릭:247 순위:4.2위 (▲1.3)
+[SEO] lavamusic.kr 클릭:247 순위:4.2위 (▲1.3)
   키워드: 기타독학 (3위) / 어쿠스틱기타추천 (5위) / 기타레슨비용 (7위)
 
 [Meta광고] 지출:₩320,000 CPA:₩8,900 CTR:2.41%
   전주대비: 지출▲15% / 전환▲28% → ROAS 개선 중
 
 [GA4] 세션:1,842 전환:36 매출:₩1,240,000
-  u 전주대비: ▲22%"""
+  전환 전주대비: ▲22%"""
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
