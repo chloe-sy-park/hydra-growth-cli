@@ -107,6 +107,84 @@ def get_naver_data():
     return curr_parsed
 
 
+
+def get_threads_data():
+    """Threads 인사이트: 추세 + 콘텐츠별 성과"""
+    try:
+        import os as _os
+        token = _os.getenv("THREADS_ACCESS_TOKEN")
+        if not token:
+            return None
+        base = "https://graph.threads.net/v1.0"
+        me = requests.get(f"{base}/me", params={"fields":"id,username,name","access_token":token}, timeout=10).json()
+        user_id = me.get("id")
+        if not user_id:
+            return None
+
+        # 14일 인사이트 → 이번 주 vs 저번 주
+        now = datetime.now()
+        ins = requests.get(f"{base}/{user_id}/threads_insights", params={
+            "metric": "views,likes,replies,reposts,quotes,followers_count",
+            "period": "day",
+            "since": int((now - timedelta(days=14)).timestamp()),
+            "until": int(now.timestamp()),
+            "access_token": token
+        }, timeout=10).json()
+
+        this_week, last_week = {}, {}
+        for item in ins.get("data", []):
+            name = item["name"]
+            if "values" in item:
+                vals = item["values"]
+                half = len(vals) // 2
+                last_week[name] = sum(v.get("value",0) for v in vals[:half])
+                this_week[name]  = sum(v.get("value",0) for v in vals[half:])
+            elif "total_value" in item:
+                this_week[name] = item["total_value"].get("value", 0)
+
+        # 최근 게시물 + 개별 인사이트
+        tl = requests.get(f"{base}/me/threads", params={
+            "fields":"id,text,timestamp","limit":10,"access_token":token
+        }, timeout=10).json()
+
+        posts = []
+        for post in tl.get("data", [])[:8]:
+            pid = post.get("id")
+            pi = requests.get(f"{base}/{pid}/insights", params={
+                "metric":"views,likes,replies,reposts,quotes","access_token":token
+            }, timeout=10).json()
+            pm = {}
+            for m in pi.get("data", []):
+                if "total_value" in m:
+                    pm[m["name"]] = m["total_value"].get("value", 0)
+                elif "values" in m:
+                    pm[m["name"]] = sum(v.get("value",0) for v in m["values"])
+            posts.append({
+                "text": (post.get("text") or "")[:60],
+                "timestamp": post.get("timestamp",""),
+                "views":   pm.get("views",0),
+                "likes":   pm.get("likes",0),
+                "replies": pm.get("replies",0),
+            })
+        posts.sort(key=lambda x: x["views"], reverse=True)
+
+        return {
+            "username": me.get("username",""),
+            "name":     me.get("name",""),
+            "followers":   this_week.get("followers_count",0),
+            "views":       this_week.get("views",0),
+            "views_prev":  last_week.get("views",0),
+            "likes":       this_week.get("likes",0),
+            "likes_prev":  last_week.get("likes",0),
+            "replies":     this_week.get("replies",0),
+            "reposts":     this_week.get("reposts",0),
+            "top_posts":   posts[:3],
+        }
+    except Exception:
+        return None
+
+
+
 def get_naver_trends():
     """네이버 DataLab 검색어 트렌드"""
     try:
@@ -444,6 +522,52 @@ def status():
             console.print(f"  지난주 대비: [{color}]{arrow}{abs(change):.0f}%[/{color}]")
         console.print()
 
+
+
+    threads = get_threads_data()
+    if threads:
+        def _pct(curr, prev):
+            if not prev: return " [dim](첫 주)[/dim]"
+            c = (curr - prev) / prev * 100
+            if abs(c) > 500: return " [dim](신규)[/dim]"
+            col = "green" if c > 0 else "red"
+            arr = "▲" if c > 0 else "▼"
+            return f" [{col}]{arr}{abs(c):.0f}%[/{col}]"
+        console.print(f"\n[bold cyan]🧵 Threads 인사이트 (최근 7일 vs 전주)[/bold cyan]")
+        console.print(f"  계정:    [cyan]@{threads['username']}[/cyan]  팔로워 {threads['followers']:,}명")
+        console.print(f"  조회수:  {threads['views']:,}{_pct(threads['views'], threads['views_prev'])}")
+        console.print(f"  좋아요:  {threads['likes']:,}{_pct(threads['likes'], threads['likes_prev'])}")
+        console.print(f"  댓글:    {threads['replies']:,}  리포스트: {threads['reposts']:,}")
+        if threads.get("top_posts"):
+            console.print(f"\n  [bold white]📌 TOP 게시물[/bold white]")
+            for i, p in enumerate(threads["top_posts"], 1):
+                preview = p["text"][:45] + ("…" if len(p["text"]) > 45 else "")
+                console.print(f"  {i}위  [white]{preview}[/white]")
+                console.print(f"       조회 {p['views']:,}  좋아요 {p['likes']:,}  댓글 {p['replies']:,}")
+            # AI 콘텐츠 추천
+            try:
+                import anthropic as _ant, os as _os
+                posts_summary = "\n".join([
+                    f"- {p['text'][:80]} (조회:{p['views']}, 좋아요:{p['likes']}, 댓글:{p['replies']})"
+                    for p in threads["top_posts"]
+                ])
+                client = _ant.Anthropic(api_key=_os.getenv("ANTHROPIC_API_KEY"))
+                msg = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=300,
+                    messages=[{"role":"user","content":f"""Threads 계정 @{threads['username']} 최근 TOP 게시물:
+{posts_summary}
+
+한국어로 2-3줄 이내로 답해줘:
+1. 어떤 콘텐츠 포맷/주제가 잘 되는지
+2. 다음에 올릴 게시물 방향 1가지 구체적 제안"""}]
+                )
+                console.print(f"\n  [bold yellow]💡 AI 콘텐츠 추천[/bold yellow]")
+                for line in msg.content[0].text.strip().split("\n"):
+                    if line.strip():
+                        console.print(f"  {line}")
+            except Exception:
+                pass
 
     trends = get_naver_trends()
     if trends:
