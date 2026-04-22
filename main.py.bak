@@ -116,9 +116,9 @@ def get_naver_trends():
         kw_env = _os.getenv("NAVER_TREND_KEYWORDS", "기타,통기타,라바뮤직")
         keywords = [k.strip() for k in kw_env.split(",") if k.strip()][:5]
         end_date = datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=29)).strftime("%Y-%m-%d")
         payload = {
-            "startDate": start_date, "endDate": end_date, "timeUnit": "month",
+            "startDate": start_date, "endDate": end_date, "timeUnit": "week",
             "keywordGroups": [{"groupName": kw, "keywords": [kw]} for kw in keywords],
         }
         headers = {
@@ -447,11 +447,11 @@ def status():
 
     trends = get_naver_trends()
     if trends:
-        console.print(f"\n[bold magenta]🔍 네이버 키워드 트렌드 (최근 3개월)[/bold magenta]")
+        console.print(f"\n[bold magenta]🔍 네이버 키워드 트렌드 (최근 4주)[/bold magenta]")
         for t in trends:
             color = "green" if t["trend"] == "▲" else ("red" if t["trend"] == "▼" else "yellow")
             sign = "+" if t["diff"] > 0 else ""
-            console.print(f"  [{color}]{t['trend']}[/{color}] {t['keyword']:12}  검색량: [bold]{t['latest']}[/bold]  전월대비: [{color}]{sign}{t['diff']}[/{color}]")
+            console.print(f"  [{color}]{t['trend']}[/{color}] {t['keyword']:12}  검색량: [bold]{t['latest']}[/bold]  전주대비: [{color}]{sign}{t['diff']}[/{color}]")
 
     if not channels and not ga4 and not gsc:
         console.print("[red]데이터를 가져올 수 없어요.[/red]")
@@ -507,6 +507,7 @@ def status():
 
 
     if not channels:
+        console.print("[red]광고 데이터를 가져올 수 없어요.[/red]")
         raise typer.Exit()
 
     render_dashboard(channels)
