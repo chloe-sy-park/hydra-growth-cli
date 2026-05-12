@@ -9,6 +9,7 @@ from rich.panel import Panel
 from rich.columns import Columns
 from rich.text import Text
 import config
+from helpers import canonicalize_page, resolve_date
 
 app = typer.Typer()
 console = Console()
@@ -384,6 +385,398 @@ def get_ga4_data():
         "revenue": revenue,
         "prev_conversions": prev_conversions,
     }
+
+# ============================================================
+# Hydra Phase A: 파라미터화된 detailed 버전 (cross-source 조인용)
+# 기존 get_gsc_data / get_ga4_data 는 backward compat을 위해 유지
+# ============================================================
+
+def get_gsc_data_detailed(
+    site_url: str = None,
+    start_date: str = "7daysAgo",
+    end_date: str = "yesterday",
+    dimensions=None,
+    row_limit: int = 1000,
+    search_type: str = "web",
+):
+    """
+    GSC 파라미터화 버전. dimensions에 'page' 포함 시 page_key 자동 부여.
+    site_url 미지정 시 config.GSC_SITE_URLS의 첫 번째 사용.
+    """
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+
+    if dimensions is None:
+        dimensions = ["query"]
+
+    target_site = site_url or (config.GSC_SITE_URLS[0] if config.GSC_SITE_URLS else None)
+    if not target_site:
+        return None
+
+    creds = Credentials(
+        token=None,
+        refresh_token=config.GOOGLE_REFRESH_TOKEN,
+        client_id=config.GOOGLE_CLIENT_ID,
+        client_secret=config.GOOGLE_CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=["https://www.googleapis.com/auth/webmasters.readonly"],
+    )
+    creds.refresh(Request())
+
+    payload = {
+        "startDate": resolve_date(start_date),
+        "endDate": resolve_date(end_date),
+        "dimensions": dimensions,
+        "rowLimit": row_limit,
+        "searchType": search_type,
+    }
+    r = requests.post(
+        f"https://www.googleapis.com/webmasters/v3/sites/{requests.utils.quote(target_site, safe='')}/searchAnalytics/query",
+        headers={"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=15,
+    )
+    data = r.json()
+    if "rows" not in data:
+        return []
+
+    out = []
+    page_idx = dimensions.index("page") if "page" in dimensions else None
+    for row in data["rows"]:
+        rec = {dim: row["keys"][i] for i, dim in enumerate(dimensions)}
+        rec.update({
+            "clicks": row["clicks"],
+            "impressions": row["impressions"],
+            "ctr": round(row["ctr"], 4),
+            "position": round(row["position"], 2),
+        })
+        if page_idx is not None:
+            rec["page_key"] = canonicalize_page(rec["page"])
+        out.append(rec)
+    return out
+
+
+def get_ga4_data_detailed(
+    start_date: str = "7daysAgo",
+    end_date: str = "yesterday",
+    dimensions=None,
+    metrics=None,
+    row_limit: int = 1000,
+):
+    """
+    GA4 파라미터화 버전. landingPage/pagePath 차원 사용 시 page_key 자동 부여.
+    """
+    from google.analytics.data_v1beta import BetaAnalyticsDataClient
+    from google.analytics.data_v1beta.types import RunReportRequest, DateRange, Metric, Dimension
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+
+    if dimensions is None:
+        dimensions = ["date"]
+    if metrics is None:
+        metrics = ["sessions", "conversions", "totalRevenue"]
+
+    creds = Credentials(
+        token=None,
+        refresh_token=config.GOOGLE_REFRESH_TOKEN,
+        client_id=config.GOOGLE_CLIENT_ID,
+        client_secret=config.GOOGLE_CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=["https://www.googleapis.com/auth/analytics.readonly"],
+    )
+    creds.refresh(Request())
+    client = BetaAnalyticsDataClient(credentials=creds)
+
+    req = RunReportRequest(
+        property=f"properties/{config.GA4_PROPERTY_ID}",
+        date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+        dimensions=[Dimension(name=d) for d in dimensions],
+        metrics=[Metric(name=m) for m in metrics],
+        limit=row_limit,
+    )
+    resp = client.run_report(req)
+
+    out = []
+    dim_names = [h.name for h in resp.dimension_headers]
+    met_names = [h.name for h in resp.metric_headers]
+    for row in resp.rows:
+        rec = {dim_names[i]: row.dimension_values[i].value for i in range(len(dim_names))}
+        for i, m in enumerate(met_names):
+            try:
+                rec[m] = float(row.metric_values[i].value)
+            except (ValueError, TypeError):
+                rec[m] = row.metric_values[i].value
+        # page_key 부여 (landingPage 또는 pagePath 차원 있을 때)
+        page_field = next((d for d in ("landingPage", "pagePath", "landingPagePlusQueryString") if d in rec), None)
+        if page_field:
+            rec["page_key"] = canonicalize_page(rec[page_field])
+        out.append(rec)
+    return out
+
+
+def get_naver_keyword_stats(keywords, show_detail: bool = True):
+    """
+    네이버 검색광고 키워드도구 (/keywordstool):
+    절대 월간검색수, 평균 CTR, 경쟁지수, 평균노출광고수.
+    Naver DataLab 트렌드(상대지표)의 절대값 보완.
+
+    keywords: list[str] 또는 쉼표구분 str. 최대 5개.
+    """
+    import hmac, hashlib, base64, time as _time
+
+    if isinstance(keywords, str):
+        keywords = [k.strip() for k in keywords.split(",") if k.strip()]
+    keywords = keywords[:5]
+    if not keywords:
+        return None
+    if not (config.NAVER_API_KEY and config.NAVER_SECRET_KEY and config.NAVER_CUSTOMER_ID):
+        return None
+
+    BASE = "https://api.naver.com"
+    PATH = "/keywordstool"
+    ts = str(int(_time.time() * 1000))
+    msg = f"{ts}.GET.{PATH}".encode("utf-8")
+    sig = base64.b64encode(
+        hmac.new(config.NAVER_SECRET_KEY.encode("utf-8"), msg, hashlib.sha256).digest()
+    ).decode("utf-8")
+
+    headers = {
+        "X-Timestamp": ts,
+        "X-API-KEY": config.NAVER_API_KEY,
+        "X-Customer": str(config.NAVER_CUSTOMER_ID),
+        "X-Signature": sig,
+    }
+    params = {
+        "hintKeywords": ",".join(keywords),
+        "showDetail": "1" if show_detail else "0",
+    }
+    try:
+        r = requests.get(BASE + PATH, headers=headers, params=params, timeout=15)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+    except Exception:
+        return None
+
+    def _to_int(v):
+        if v is None:
+            return 0
+        if isinstance(v, str) and "<" in v:
+            return 5  # API가 노출량 적을 때 '< 10' 반환
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return 0
+
+    def _to_float(v):
+        try:
+            return round(float(v), 2)
+        except (ValueError, TypeError):
+            return 0.0
+
+    out = []
+    for k in data.get("keywordList", []):
+        out.append({
+            "keyword": k.get("relKeyword"),
+            "monthly_pc_search": _to_int(k.get("monthlyPcQcCnt")),
+            "monthly_mobile_search": _to_int(k.get("monthlyMobileQcCnt")),
+            "monthly_total_search": _to_int(k.get("monthlyPcQcCnt")) + _to_int(k.get("monthlyMobileQcCnt")),
+            "monthly_pc_clicks": _to_int(k.get("monthlyAvePcClkCnt")),
+            "monthly_mobile_clicks": _to_int(k.get("monthlyAveMobileClkCnt")),
+            "pc_ctr": _to_float(k.get("monthlyAvePcCtr")),
+            "mobile_ctr": _to_float(k.get("monthlyAveMobileCtr")),
+            "comp_index": k.get("compIdx"),  # 낮음/중간/높음
+            "avg_ad_depth": _to_int(k.get("plAvgDepth")),
+        })
+    # 총 검색량 내림차순
+    out.sort(key=lambda x: x["monthly_total_search"], reverse=True)
+    return out or None
+
+
+def compute_kghs(weeks: int = 4):
+    """
+    Korean Growth Health Score v2.
+
+    v2 변경점 (vs v1):
+      • SocialHealth(Threads) 컴포넌트 추가 → 5개로 확장
+      • 데이터 부재 컴포넌트의 1.0 fallback 제거. confidence(0~1)을 가중치에 곱해
+        실데이터 있는 컴포넌트만 총점에 반영. coverage(0~1) 별도 노출.
+      • 컴포넌트별 trend 문자열 (W-1 또는 weeks-주 MA 대비 변화율)
+      • alerts: 임계값 위반 시 조기경보 메시지 리스트
+
+    score 의미: 1.0 = 평년, 1.3+ = 양호, 0.9↓ = 주의, 0.7↓ = 위험
+    """
+    components = {}  # name -> {score, confidence, trend, note}
+
+    def _comp(name, score=1.0, confidence=0.0, trend=None, note=None):
+        components[name] = {
+            "score": round(float(score), 2),
+            "confidence": round(float(confidence), 2),
+            "trend": trend,
+            "note": note,
+        }
+
+    def _arrow(pct, pos_thresh=1.0):
+        return "↑" if pct > pos_thresh else "↓" if pct < -pos_thresh else "→"
+
+    # ── NaverHealth: 키워드 트렌드 평균 변화율 ──
+    try:
+        trends = get_naver_trends()
+        if trends:
+            avg_diff = sum(t["diff"] for t in trends) / len(trends)
+            score = max(0.5, min(1.0 + avg_diff / 100, 2.0))
+            _comp("NaverHealth", score=score, confidence=1.0,
+                  trend=f"{_arrow(avg_diff)} {avg_diff:+.1f}p",
+                  note=f"키워드 {len(trends)}개 평균 트렌드")
+        else:
+            _comp("NaverHealth", note="네이버 DataLab 미연동")
+    except Exception as e:
+        _comp("NaverHealth", note=f"오류: {type(e).__name__}")
+
+    # ── GoogleHealth: GSC CTR (벤치마크 3%) + weeks-주 MA 대비 트렌드 ──
+    try:
+        gsc_now = get_gsc_data()
+        if gsc_now:
+            total_clicks = sum(s["clicks"] for s in gsc_now)
+            total_imp = sum(s["impressions"] for s in gsc_now)
+            ctr = (total_clicks / total_imp) if total_imp else 0
+            score = min(ctr / 0.03, 1.5)
+
+            # 4주(weeks) baseline CTR 시도 — 실패해도 점수는 유효
+            trend_str = None
+            try:
+                base_rows = get_gsc_data_detailed(
+                    start_date=f"{weeks*7}daysAgo", end_date="8daysAgo")
+                if base_rows:
+                    bc = sum(r["clicks"] for r in base_rows)
+                    bi = sum(r["impressions"] for r in base_rows)
+                    base_ctr = (bc / bi) if bi else 0
+                    if base_ctr > 0:
+                        pct = (ctr / base_ctr - 1) * 100
+                        trend_str = f"{_arrow(pct)} CTR {pct:+.1f}% (vs {weeks}주 MA)"
+            except Exception:
+                pass
+
+            _comp("GoogleHealth", score=score, confidence=1.0,
+                  trend=trend_str, note=f"CTR {ctr*100:.2f}%")
+        else:
+            _comp("GoogleHealth", note="GSC 미연동")
+    except Exception as e:
+        _comp("GoogleHealth", note=f"오류: {type(e).__name__}")
+
+    # ── ConversionHealth: GA4 전환 W-1 대비 ──
+    try:
+        ga4 = get_ga4_data()
+        if ga4 and ga4.get("prev_conversions", 0) > 0:
+            ratio = ga4["conversions"] / ga4["prev_conversions"]
+            score = min(ratio, 2.0)
+            pct = (ratio - 1) * 100
+            _comp("ConversionHealth", score=score, confidence=1.0,
+                  trend=f"{_arrow(pct)} 전환 {pct:+.1f}%",
+                  note=f"전환 {ga4['conversions']}건 (전주 {ga4['prev_conversions']}건)")
+        elif ga4:
+            _comp("ConversionHealth", confidence=0.3, note="전주 데이터 없음")
+        else:
+            _comp("ConversionHealth", note="GA4 미연동")
+    except Exception as e:
+        _comp("ConversionHealth", note=f"오류: {type(e).__name__}")
+
+    # ── PaidEfficiency: Meta CPA W-1 대비 (낮을수록 좋음) ──
+    try:
+        meta = get_meta_data()
+        if meta and meta.get("prev_cpa", 0) > 0:
+            ratio = meta["prev_cpa"] / max(meta["cpa"], 1)
+            score = min(ratio, 2.0)
+            cpa_pct = (meta["cpa"] / meta["prev_cpa"] - 1) * 100
+            # CPA는 낮을수록 좋음 → 화살표 방향 반전
+            arrow = "↑" if cpa_pct < -1 else "↓" if cpa_pct > 1 else "→"
+            _comp("PaidEfficiency", score=score, confidence=1.0,
+                  trend=f"{arrow} CPA {cpa_pct:+.1f}%",
+                  note=f"CPA {meta['cpa']:,.0f}원")
+        elif meta:
+            _comp("PaidEfficiency", confidence=0.3, note="전주 CPA 데이터 없음")
+        else:
+            _comp("PaidEfficiency", note="Meta 광고 미연동")
+    except Exception as e:
+        _comp("PaidEfficiency", note=f"오류: {type(e).__name__}")
+
+    # ── SocialHealth: Threads 조회수 W-1 대비 (NEW) ──
+    try:
+        th = get_threads_data()
+        if th and th.get("views_prev", 0) > 0:
+            ratio = th["views"] / th["views_prev"]
+            score = max(0.5, min(ratio, 2.0))
+            pct = (ratio - 1) * 100
+            _comp("SocialHealth", score=score, confidence=1.0,
+                  trend=f"{_arrow(pct)} 조회 {pct:+.1f}%",
+                  note=f"이번주 조회 {th['views']:,}회")
+        elif th:
+            _comp("SocialHealth", confidence=0.3, note="저번주 조회 데이터 없음")
+        else:
+            _comp("SocialHealth", note="Threads 미연동")
+    except Exception as e:
+        _comp("SocialHealth", note=f"오류: {type(e).__name__}")
+
+    # ── 가중치 (confidence 적용한 정규화 합산) ──
+    base_weights = {
+        "NaverHealth":      0.20,
+        "GoogleHealth":     0.20,
+        "ConversionHealth": 0.30,
+        "PaidEfficiency":   0.20,
+        "SocialHealth":     0.10,
+    }
+
+    weighted_sum = 0.0
+    weight_total = 0.0
+    for name, c in components.items():
+        w_eff = base_weights.get(name, 0) * c["confidence"]
+        weighted_sum += c["score"] * w_eff
+        weight_total += w_eff
+
+    if weight_total > 0:
+        total = round(weighted_sum / weight_total, 2)
+        coverage = round(weight_total, 2)  # 0~1 (base weight 합이 1.0)
+    else:
+        total = 1.0
+        coverage = 0.0
+
+    # ── alerts (조기경보) ──
+    alerts = []
+    for name, c in components.items():
+        if c["confidence"] == 0:
+            continue
+        if c["score"] < 0.7:
+            alerts.append(f"🔴 {name}: 위험 수준 (score {c['score']})")
+        elif c["score"] < 0.9:
+            alerts.append(f"🟡 {name}: 주의 (score {c['score']})")
+        # 트렌드 문자열에서 % 추출해 -30% 이하면 급락 alert
+        if c["trend"]:
+            try:
+                pct_token = next((t for t in c["trend"].split() if t.endswith("%")), None)
+                if pct_token:
+                    pct_val = float(pct_token.rstrip("%").replace("+", ""))
+                    if pct_val <= -30:
+                        alerts.append(f"⚠️ {name}: 급락 감지 ({c['trend']})")
+            except (ValueError, IndexError):
+                pass
+    if coverage < 0.5:
+        alerts.append(
+            f"⚪ 데이터 커버리지 낮음 ({coverage*100:.0f}%) — 점수 신뢰도 제한적")
+
+    return {
+        "version": "v2",
+        "kghs": total,            # 1.0 = 평년, 2.0 = 매우 좋음, 0.5 미만 = 위험
+        "coverage": coverage,     # 0~1, 신뢰 가능한 컴포넌트의 가중치 합
+        "components": components, # {name: {score, confidence, trend, note}}
+        "weights": base_weights,
+        "alerts": alerts,
+        "interpretation": (
+            "🟢 매우 양호" if total >= 1.3 else
+            "🟡 평년 수준" if total >= 0.9 else
+            "🔴 주의 필요"
+        ),
+    }
+
 
 def cpa_status(cpa, prev_cpa):
     if prev_cpa == 0:

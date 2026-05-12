@@ -3,7 +3,12 @@ sys.path.insert(0, os.path.expanduser("~/growth-cli"))
 from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
 load_dotenv(os.path.expanduser("~/growth-cli/.env"))
-from main import get_naver_trends, get_gsc_data, get_threads_data, get_meta_data, get_ga4_data
+from main import (
+    get_naver_trends, get_gsc_data, get_threads_data, get_meta_data, get_ga4_data,
+    get_naver_data,  # 네이버 검색광고 캠페인 성과 (기존 함수 노출)
+    get_gsc_data_detailed, get_ga4_data_detailed,  # Phase A: 파라미터화
+    get_naver_keyword_stats, compute_kghs,  # Phase B: 신규
+)
 
 mcp = FastMCP("hydra_growth_mcp")
 
@@ -196,6 +201,151 @@ nC=new Chart(document.getElementById("nc"),{type:"line",data:{labels:["1월","2�
 </script>
 </body>
 </html>"""
+
+
+# ============================================================
+# Phase A: 파라미터화된 분석 도구 (cross-source 조인 지원)
+# ============================================================
+
+@mcp.tool(name="hydra_get_seo_data", annotations={"readOnlyHint": True})
+def hydra_get_seo_data(
+    start_date: str = "7daysAgo",
+    end_date: str = "yesterday",
+    dimensions: str = "query",
+    row_limit: int = 100,
+    site_url: str = "",
+) -> str:
+    """
+    Google Search Console 상세 데이터 (파라미터 자유 지정).
+    dimensions=쉼표구분 (query|page|country|device|date). page 포함시 page_key 자동 부여.
+    예: dimensions='page,query', start_date='30daysAgo'
+    """
+    dims = [d.strip() for d in dimensions.split(",") if d.strip()]
+    rows = get_gsc_data_detailed(
+        site_url=site_url or None,
+        start_date=start_date,
+        end_date=end_date,
+        dimensions=dims,
+        row_limit=row_limit,
+    )
+    if not rows:
+        return "GSC 데이터 없음."
+    lines = [f"GSC {start_date}~{end_date} | dims={dims} | rows={len(rows)}"]
+    for r in rows[:20]:
+        key_str = " / ".join(str(r.get(d, "")) for d in dims)
+        lines.append(f"  {key_str} | clicks:{r['clicks']} imp:{r['impressions']} ctr:{r['ctr']:.2%} pos:{r['position']:.1f}")
+    if len(rows) > 20:
+        lines.append(f"  ... +{len(rows)-20} more rows")
+    return "\n".join(lines)
+
+
+@mcp.tool(name="hydra_get_ga4_traffic", annotations={"readOnlyHint": True})
+def hydra_get_ga4_traffic(
+    start_date: str = "7daysAgo",
+    end_date: str = "yesterday",
+    dimensions: str = "date",
+    metrics: str = "sessions,conversions,totalRevenue",
+    row_limit: int = 100,
+) -> str:
+    """
+    GA4 상세 트래픽 데이터 (파라미터 자유 지정).
+    dimensions: date,landingPage,sessionSource,deviceCategory 등 쉼표구분.
+    landingPage 차원 포함시 page_key 자동 부여 (GSC와 조인 가능).
+    """
+    dims = [d.strip() for d in dimensions.split(",") if d.strip()]
+    mets = [m.strip() for m in metrics.split(",") if m.strip()]
+    rows = get_ga4_data_detailed(
+        start_date=start_date, end_date=end_date,
+        dimensions=dims, metrics=mets, row_limit=row_limit,
+    )
+    if not rows:
+        return "GA4 데이터 없음."
+    lines = [f"GA4 {start_date}~{end_date} | dims={dims} | rows={len(rows)}"]
+    for r in rows[:20]:
+        key_str = " / ".join(str(r.get(d, "")) for d in dims)
+        met_str = " ".join(f"{m}:{r.get(m, 0)}" for m in mets)
+        lines.append(f"  {key_str} | {met_str}")
+    if len(rows) > 20:
+        lines.append(f"  ... +{len(rows)-20} more rows")
+    return "\n".join(lines)
+
+
+# ============================================================
+# Phase B: 신규 — Naver 검색광고 (절대치 + 캠페인 성과)
+# ============================================================
+
+@mcp.tool(name="hydra_get_naver_keyword_stats", annotations={"readOnlyHint": True})
+def hydra_get_naver_keyword_stats(keywords: str) -> str:
+    """
+    네이버 검색광고 키워드도구: 절대 월간검색수, CTR, 경쟁지수.
+    Naver 트렌드(상대지표)의 절대값 보완. 한국 SEO 이중 엔진의 핵심.
+    keywords=쉼표구분 (최대 5개) 예: '기타,통기타,기타레슨'
+    """
+    rows = get_naver_keyword_stats(keywords)
+    if not rows:
+        return "네이버 키워드 데이터 없음. NAVER_API_KEY/SECRET/CUSTOMER_ID 확인 필요."
+    lines = [f"네이버 검색광고 키워드 통계 ({len(rows)}개)"]
+    for r in rows:
+        lines.append(
+            f"  {r['keyword']} | 월검색:{r['monthly_total_search']:,} "
+            f"(PC:{r['monthly_pc_search']:,}/M:{r['monthly_mobile_search']:,}) "
+            f"경쟁:{r['comp_index']} 광고노출:{r['avg_ad_depth']}"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool(name="hydra_get_naver_search_ads", annotations={"readOnlyHint": True})
+def hydra_get_naver_search_ads() -> str:
+    """
+    네이버 검색광고 캠페인 성과 (7일): 지출, 전환, CPA, CTR.
+    이전엔 CLI 전용이었던 데이터를 MCP로 노출.
+    """
+    data = get_naver_data()
+    if not data:
+        return "네이버 검색광고 데이터 없음."
+    lines = [
+        f"네이버 SA (7일) | 지출:{data.get('spend',0):,.0f}원",
+        f"전환:{data.get('conversions',0)} CPA:{data.get('cpa',0):,.0f}원 CTR:{data.get('ctr',0):.2f}%",
+    ]
+    if data.get("prev_cpa"):
+        c = (data["cpa"] - data["prev_cpa"]) / data["prev_cpa"] * 100 if data["prev_cpa"] else 0
+        lines.append(f"CPA 전주대비: {'▲' if c>0 else '▼'}{abs(c):.0f}%")
+    return "\n".join(lines)
+
+
+@mcp.tool(name="hydra_get_kghs", annotations={"readOnlyHint": True})
+def hydra_get_kghs(weeks: int = 4) -> str:
+    """
+    Korean Growth Health Score v2: 한국 그로스 마케팅 종합 건강 지표.
+    Naver / Google / Conversion / Paid / Social(Threads) 5개 컴포넌트를
+    confidence 가중치로 합산. 컴포넌트별 trend + 조기경보(alerts) 포함.
+
+    weeks: GoogleHealth 추세 비교에 쓸 baseline 주차수 (기본 4주)
+    """
+    s = compute_kghs(weeks=weeks)
+    lines = [
+        f"KGHS({s['version']}) = {s['kghs']}  {s['interpretation']}"
+        f"   (coverage {s['coverage']*100:.0f}%)",
+        "── 컴포넌트 ──",
+    ]
+    for k, c in s["components"].items():
+        w = s["weights"].get(k, 0)
+        conf = c["confidence"]
+        score_str = f"{c['score']:.2f}" if conf > 0 else "  -- "
+        head = f"  {k:18s} {score_str}  w {w*100:.0f}% × conf {conf:.1f}"
+        lines.append(head)
+        details = []
+        if c.get("trend"):
+            details.append(c["trend"])
+        if c.get("note"):
+            details.append(c["note"])
+        if details:
+            lines.append(f"      └ {' · '.join(details)}")
+    if s.get("alerts"):
+        lines.append("── alerts ──")
+        for a in s["alerts"]:
+            lines.append(f"  {a}")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
